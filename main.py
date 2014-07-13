@@ -31,16 +31,63 @@ PCR_AUTH_TOKEN = 'qL_UuCVxRBUmjWbkCdI554grLjRMPY'
 # #         self.response.write(r.text)
 #         self.response.write('hello world')
 
-from flask import Flask
-import json, requests
-import penncoursereview
+from flask import Flask, jsonify, request
+import json, requests, yaml
+import penncoursereview, penn
 
 app = Flask(__name__)
 app.config['DEBUG'] = True
 
+baseURL = "http://api.penncoursereview.com/v1/"
+
+from datetime import timedelta
+from flask import make_response, request, current_app
+from functools import update_wrapper
 
 
-@app.route('/')
+def crossdomain(origin=None, methods=None, headers=None,
+                max_age=21600, attach_to_all=True,
+                automatic_options=True):
+    if methods is not None:
+        methods = ', '.join(sorted(x.upper() for x in methods))
+    if headers is not None and not isinstance(headers, basestring):
+        headers = ', '.join(x.upper() for x in headers)
+    if not isinstance(origin, basestring):
+        origin = ', '.join(origin)
+    if isinstance(max_age, timedelta):
+        max_age = max_age.total_seconds()
+
+    def get_methods():
+        if methods is not None:
+            return methods
+
+        options_resp = current_app.make_default_options_response()
+        return options_resp.headers['allow']
+
+    def decorator(f):
+        def wrapped_function(*args, **kwargs):
+            if automatic_options and request.method == 'OPTIONS':
+                resp = current_app.make_default_options_response()
+            else:
+                resp = make_response(f(*args, **kwargs))
+            if not attach_to_all and request.method != 'OPTIONS':
+                return resp
+
+            h = resp.headers
+
+            h['Access-Control-Allow-Origin'] = origin
+            h['Access-Control-Allow-Methods'] = get_methods()
+            h['Access-Control-Max-Age'] = str(max_age)
+            if headers is not None:
+                h['Access-Control-Allow-Headers'] = headers
+            return resp
+
+        f.provide_automatic_options = False
+        return update_wrapper(wrapped_function, f)
+    return decorator
+
+@app.route('/', methods=['GET'])
+@crossdomain(origin='*')
 def hello():
     """Return a friendly HTTP greeting."""
     # print 'hello world'
@@ -48,12 +95,25 @@ def hello():
     # data = json.loads(r.text)
     # z =  data["result"]["values"][0]["ratings"]["rDifficulty"]
     # return json.dumps(data['result']['values'][0]['ratings'])
-    cis120 = penncoursereview.CourseHistory("CIS-120")
-    print cis120["reviews"]["path"]
-    # print 
-    return 'hello world'
+    c = request.args["class"]
+    cis120 = penncoursereview.CourseHistory(c)
+    r = requests.get(baseURL + cis120["reviews"]["path"] + "?token="+PCR_AUTH_TOKEN)
+    data =  yaml.load(r.text)
+    i = 0
+    difficulty = 0
+    quality = 0
+    for section in data["result"]["values"]:
+        difficulty+=float(section["ratings"]["rDifficulty"])
+        quality+=float(section["ratings"]["rCourseQuality"])
+        i+=1
+    difficulty = difficulty / i
+    quality = quality / i
+    return json.dumps({'difficulty': difficulty, 'quality': quality})
+    # return request.data
 
 @app.errorhandler(404)
 def page_not_found(e):
     """Return a custom 404 error."""
     return 'Sorry, nothing at this URL.', 404
+
+
