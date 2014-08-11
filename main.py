@@ -19,6 +19,8 @@
 # import requests
 
 PCR_AUTH_TOKEN = 'qL_UuCVxRBUmjWbkCdI554grLjRMPY'
+username = 'UPENN_OD_emtz_1000643'
+password = 'o448e5mnbutjcji5ufofo630ur'
 
 
 # class MainHandler(webapp2.RequestHandler):
@@ -33,7 +35,10 @@ PCR_AUTH_TOKEN = 'qL_UuCVxRBUmjWbkCdI554grLjRMPY'
 
 from flask import Flask, jsonify, request
 import json, requests, yaml
-import penncoursereview, penn
+import penncoursereview
+from penn import registrar
+
+import profHash
 
 app = Flask(__name__)
 app.config['DEBUG'] = True
@@ -86,30 +91,53 @@ def crossdomain(origin=None, methods=None, headers=None,
         return update_wrapper(wrapped_function, f)
     return decorator
 
-@app.route('/', methods=['GET'])
+@app.route('/req', methods=['GET'])
 @crossdomain(origin='*')
 def hello():
-    """Return a friendly HTTP greeting."""
-    # print 'hello world'
-    # r = requests.get("http://api.penncoursereview.com/v1/courses/13021/reviews?token=qL_UuCVxRBUmjWbkCdI554grLjRMPY")
-    # data = json.loads(r.text)
-    # z =  data["result"]["values"][0]["ratings"]["rDifficulty"]
-    # return json.dumps(data['result']['values'][0]['ratings'])
     c = request.args["class"]
-    cis120 = penncoursereview.CourseHistory(c)
-    r = requests.get(baseURL + cis120["reviews"]["path"] + "?token="+PCR_AUTH_TOKEN)
-    data =  yaml.load(r.text)
-    i = 0
+    history = penncoursereview.CourseHistory(c)
     difficulty = 0
     quality = 0
-    for section in data["result"]["values"]:
-        difficulty+=float(section["ratings"]["rDifficulty"])
-        quality+=float(section["ratings"]["rCourseQuality"])
-        i+=1
-    difficulty = difficulty / i
-    quality = quality / i
-    return json.dumps({'difficulty': difficulty, 'quality': quality})
-    # return request.data
+    rProf = 0
+    try:
+        r = requests.get(baseURL + history["reviews"]["path"] + "?token="+ PCR_AUTH_TOKEN)
+        data =  yaml.load(r.text)
+        i = 0
+        j = 0
+        for section in data["result"]["values"]:
+            difficulty+=float(section["ratings"]["rDifficulty"])
+            quality+=float(section["ratings"]["rCourseQuality"])
+            i+=1
+        difficulty = difficulty / i
+        quality = quality / i
+    except ValueError:
+        print 'caught error'
+    finally:
+        if len(request.args["prof"]) > 0:
+            prof = profHash.profHash[request.args["prof"]]
+            profReviews = requests.get(baseURL + 'instructors/' + prof[0]["id"] + '/reviews?token=' + PCR_AUTH_TOKEN)
+            profReviews = yaml.load(profReviews.text)
+            for section in profReviews["result"]["values"]:
+                rProf += float(section["ratings"]["rInstructorQuality"])
+                j+=1
+            rProf = rProf / j
+            print rProf
+    return json.dumps({'difficulty': difficulty, 'quality': quality, 'prof': rProf})
+
+@app.route('/scheduler', methods=['GET'])
+@crossdomain(origin='*')
+def schedule():
+    # c = request.args['class'].split('-')
+    c = [x.strip() for x in request.args['class'].split('-')]
+    reg = registrar.Registrar(username, password)
+    section = reg.section(c[0], c[1], c[2])
+    return json.dumps(section["meetings"])
+
+
+@app.route('/')
+def landing():
+    return 'hello world'
+
 
 @app.errorhandler(404)
 def page_not_found(e):
